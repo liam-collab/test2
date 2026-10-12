@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Booth — Live YouTube Translator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #12202b;
+    --surface: #1a2d3b;
+    --surface-2: #223a4b;
+    --line: #2f4b5f;
+    --text: #eef3f1;
+    --muted: #93aab8;
+    --lamp: #f2c14e;
+    --ok: #7fd1b9;
+    --bad: #ff8a80;
+    --radius: 10px;
+    --font: "Bricolage Grotesque", "Segoe UI", system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); }
+  body { min-height: 100vh; }
+  button, select, input { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--lamp); outline-offset: 2px; }
+
+  header { display: flex; align-items: baseline; gap: 14px; padding: 18px 24px 6px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+  header p { margin: 0; color: var(--muted); font-size: 15px; }
+
+  main { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, 1fr); gap: 20px; padding: 14px 24px 28px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 14px 24px; } header { padding: 16px 14px 4px; } }
+
+  .urlbar { display: flex; gap: 8px; margin-bottom: 12px; }
+  .urlbar input { flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 11px 14px; }
+  .urlbar input::placeholder { color: var(--muted); }
+
+  .btn { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 16px; cursor: pointer; font-weight: 600; }
+  .btn:hover { border-color: var(--muted); }
+  .btn.primary { background: var(--lamp); color: #1b1704; border-color: var(--lamp); }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.stop { background: var(--bad); color: #2a0b08; border-color: var(--bad); }
+
+  .stage { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); }
+  .stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .placeholder { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--muted); }
+  .placeholder strong { display: block; color: var(--text); font-size: 20px; margin-bottom: 6px; }
+
+  .captions { position: absolute; left: 0; right: 0; bottom: 8%; display: flex; justify-content: center; padding: 0 5%; pointer-events: none; transition: opacity .25s; }
+  .captions.idle { opacity: 0; }
+  .cap-box { background: rgba(8, 14, 20, .82); border-radius: 8px; padding: 8px 16px 10px; max-width: 100%; text-align: center; }
+  .cap-orig { color: var(--muted); font-size: calc(var(--cap) * .55); line-height: 1.25; }
+  .cap-trans { color: var(--lamp); font-size: var(--cap); font-weight: 600; line-height: 1.25; }
+  .cap-box:empty { display: none; }
+
+  .controls { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: grid; gap: 14px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  label { display: grid; gap: 5px; font-size: 13px; color: var(--muted); }
+  select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; color: var(--text); }
+  input[type=range] { accent-color: var(--lamp); width: 100%; }
+
+  .status { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); min-height: 22px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); flex: none; }
+  .dot.live { background: var(--bad); animation: pulse 1.4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  .transcript { margin-top: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); display: flex; flex-direction: column; max-height: 420px; }
+  .tr-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 600; }
+  .tr-head .btn { padding: 5px 10px; font-size: 13px; }
+  .tr-body { overflow-y: auto; padding: 6px 14px 10px; }
+  .tr-empty { color: var(--muted); padding: 14px 0; font-size: 14px; }
+  .entry { padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .entry:last-child { border-bottom: 0; }
+  .entry .o { color: var(--muted); font-size: 13px; }
+  .entry .t { margin-top: 2px; }
+  .entry time { color: var(--muted); font-size: 12px; margin-right: 6px; }
+
+  details { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px; margin-top: 16px; font-size: 14px; color: var(--muted); }
+  summary { cursor: pointer; color: var(--text); font-weight: 600; }
+  details p, details li { line-height: 1.5; }
+  details ul { padding-left: 18px; }
+  .err { color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Booth</h1>
+  <p>Live captions for any YouTube video or stream, translated as it's spoken.</p>
+</header>
+
+<main>
+  <section>
+    <div class="urlbar">
+      <input id="url" type="url" placeholder="Paste a YouTube link, embed link, or &lt;iframe&gt; code" aria-label="YouTube link" autocomplete="off">
+      <button class="btn" id="load">Load video</button>
+    </div>
+
+    <div class="stage" id="stage">
+      <div class="placeholder" id="placeholder">
+        <div><strong>No video loaded</strong>Paste a YouTube link above, then press Start translating.</div>
+      </div>
+      <div class="captions idle" id="captions" style="--cap:28px">
+        <div class="cap-box" id="capBox">
+          <div class="cap-orig" id="capOrig"></div>
+          <div class="cap-trans" id="capTrans"></div>
+        </div>
+      </div>
+    </div>
+
+    <details>
+      <summary>How to get the best audio (read this once)</summary>
+      <p>Browsers can't read audio straight out of a YouTube player, so Booth listens through your <strong>default microphone input</strong>. Two ways to feed it:</p>
+      <ul>
+        <li><strong>Easiest:</strong> play the video through your speakers and keep your mic nearby. Works, but quality depends on your room.</li>
+        <li><strong>Cleanest:</strong> route system audio into the mic input with a virtual cable (VB-Cable on Windows, BlackHole on Mac, a loopback source on Linux) and set it as your default input. Use headphones so nothing echoes.</li>
+      </ul>
+      <p>Pick the language being <em>spoken</em> in the video. Speech recognition needs to know it up front.</p>
+    </details>
+  </section>
+
+  <aside>
+    <div class="controls">
+      <div class="row">
+        <label>Spoken language
+          <select id="src"></select>
+        </label>
+        <label>Translate into
+          <select id="tgt"></select>
+        </label>
+      </div>
+      <label>Caption size
+        <input type="range" id="size" min="16" max="48" value="28">
+      </label>
+      <button class="btn primary" id="toggle">Start translating</button>
+      <div class="status"><span class="dot" id="dot"></span><span id="statusText">Ready.</span></div>
+    </div>
+
+    <div class="transcript">
+      <div class="tr-head">
+        <span>Transcript</span>
+        <span>
+          <button class="btn" id="dl">Save .txt</button>
+          <button class="btn" id="clear">Clear</button>
+        </span>
+      </div>
+      <div class="tr-body" id="trBody">
+        <div class="tr-empty" id="trEmpty">Translated lines will appear here as people speak.</div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+
+  // Spoken-language options (speech recognition locales)
+  const SRC = [
+    ['en-US','English (US)'],['en-GB','English (UK)'],['es-ES','Spanish (Spain)'],['es-MX','Spanish (Mexico)'],
+    ['fr-FR','French'],['de-DE','German'],['it-IT','Italian'],['pt-BR','Portuguese (Brazil)'],['pt-PT','Portuguese (Portugal)'],
+    ['ru-RU','Russian'],['uk-UA','Ukrainian'],['pl-PL','Polish'],['nl-NL','Dutch'],['sv-SE','Swedish'],['cs-CZ','Czech'],
+    ['ro-RO','Romanian'],['hu-HU','Hungarian'],['el-GR','Greek'],['tr-TR','Turkish'],['he-IL','Hebrew'],
+    ['ar-SA','Arabic'],['fa-IR','Persian'],['hi-IN','Hindi'],['bn-BD','Bengali'],['ur-PK','Urdu'],['ta-IN','Tamil'],
+    ['th-TH','Thai'],['vi-VN','Vietnamese'],['id-ID','Indonesian'],['ms-MY','Malay'],['fil-PH','Filipino'],
+    ['ja-JP','Japanese'],['ko-KR','Korean'],['zh-CN','Chinese (Mandarin)'],['yue-Hant-HK','Cantonese'],['sw-KE','Swahili']
+  ];
+  const TGT = [
+    ['en','English'],['es','Spanish'],['fr','French'],['de','German'],['it','Italian'],['pt','Portuguese'],
+    ['ru','Russian'],['uk','Ukrainian'],['pl','Polish'],['nl','Dutch'],['sv','Swedish'],['cs','Czech'],['ro','Romanian'],
+    ['hu','Hungarian'],['el','Greek'],['tr','Turkish'],['he','Hebrew'],['ar','Arabic'],['fa','Persian'],['hi','Hindi'],
+    ['bn','Bengali'],['ur','Urdu'],['ta','Tamil'],['th','Thai'],['vi','Vietnamese'],['id','Indonesian'],['ja','Japanese'],
+    ['ko','Korean'],['zh','Chinese'],['sw','Swahili']
+  ];
+  const fill = (sel, list, def) => {
+    list.forEach(([v, n]) => { const o = document.createElement('option'); o.value = v; o.textContent = n; sel.appendChild(o); });
+    sel.value = def;
+  };
+  fill($('src'), SRC, localStorageGet('src') || 'es-ES');
+  fill($('tgt'), TGT, localStorageGet('tgt') || 'en');
+
+  function localStorageGet(k) { try { return localStorage.getItem('booth_' + k); } catch { return null; } }
+  function localStorageSet(k, v) { try { localStorage.setItem('booth_' + k, v); } catch {} }
+
+  const base = code => code.split('-')[0];
+
+  // ---------- Video ----------
+  function parseYouTube(input) {
+    input = (input || '').trim();
+    if (/^[\w-]{11}$/.test(input)) return input;
+    try {
+      const u = new URL(input);
+      if (u.hostname.includes('youtu.be')) return u.pathname.slice(1, 12);
+      const v = u.searchParams.get('v');
+      if (v) return v;
+      const m = u.pathname.match(/\/(?:live|embed|shorts|v)\/([\w-]{11})/);
+      if (m) return m[1];
+    } catch {}
+    return null;
+  }
+
+  // Accepts: watch/share/live/shorts links, embed links, playlist embeds, or a pasted <iframe> snippet
+  function resolveEmbedSrc(input) {
+    input = (input || '').trim();
+    const snippet = input.match(/<iframe[^>]*?\ssrc\s*=\s*["']([^"']+)["']/i);
+    if (snippet) input = snippet[1].replace(/&amp;/g, '&');
+    if (input.startsWith('//')) input = 'https:' + input;
+    try {
+      const u = new URL(input);
+      if (/(^|\.)youtube(-nocookie)?\.com$/.test(u.hostname) && u.pathname.startsWith('/embed/')) {
+        // Embed link: keep it as given (start time, playlist, etc.), just make sure it autoplays
+        if (!u.searchParams.has('autoplay')) u.searchParams.set('autoplay', '1');
+        if (!u.searchParams.has('playsinline')) u.searchParams.set('playsinline', '1');
+        return u.toString();
+      }
+    } catch {}
+    const id = parseYouTube(input);
+    return id ? `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&playsinline=1` : null;
+  }
+
+  function loadVideo() {
+    const src = resolveEmbedSrc($('url').value);
+    if (!src) { setStatus('That doesn\'t look like a YouTube link or embed code.', 'err'); return false; }
+    if (!/^https?:$/.test(location.protocol) || location.origin === 'null') {
+      setStatus('This page has no web address, so YouTube will refuse to play the video (player configuration error). Run it from localhost or a web host instead of opening the file directly.', 'err');
+    }
+    const stage = $('stage');
+    stage.querySelectorAll('iframe').forEach(f => f.remove());
+    $('placeholder').style.display = 'none';
+    const f = document.createElement('iframe');
+    f.src = src;
+    f.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+    f.allowFullscreen = true;
+    f.referrerPolicy = 'strict-origin-when-cross-origin';
+    f.title = 'YouTube video';
+    stage.insertBefore(f, $('captions'));
+    return true;
+  }
+  $('load').addEventListener('click', loadVideo);
+  $('url').addEventListener('keydown', e => { if (e.key === 'Enter') loadVideo(); });
+
+  // ---------- Status ----------
+  function setStatus(text, kind) {
+    const el = $('statusText');
+    el.textContent = text;
+    el.className = kind === 'err' ? 'err' : '';
+  }
+
+  // ---------- Translation ----------
+  let translator = null;
+  let engineLabel = '';
+  let identity = false;
+
+  async function prepareTranslator(srcBase, tgtBase) {
+    translator = null; identity = false;
+    if (srcBase === tgtBase) { identity = true; engineLabel = 'no translation needed'; return; }
+    // 1) Chrome's on-device Translator API (private, fast, works offline after model download)
+    if ('Translator' in self) {
+      try {
+        const opts = { sourceLanguage: srcBase, targetLanguage: tgtBase };
+        const avail = await Translator.availability(opts);
+        if (avail !== 'unavailable') {
+          setStatus(avail === 'available' ? 'Loading translator…' : 'Downloading language pack (one time)…');
+          translator = await Translator.create({
+            ...opts,
+            monitor(m) { m.addEventListener('downloadprogress', e => setStatus(`Downloading language pack… ${Math.round(e.loaded * 100)}%`)); }
+          });
+          engineLabel = 'on-device';
+          return;
+        }
+      } catch (e) { console.warn('On-device translator failed', e); }
+    }
+    // 2) Fallback: MyMemory web API
+    engineLabel = 'web (MyMemory)';
+  }
+
+  async function translate(text) {
+    if (identity) return text;
+    if (translator) {
+      try { return await translator.translate(text); } catch (e) { console.warn(e); }
+    }
+    const tgt = base($('tgt').value) === 'zh' ? 'zh-CN' : base($('tgt').value);
+    const src = base($('src').value) === 'zh' ? 'zh-CN' : base($('src').value);
+    const r = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 480))}&langpair=${src}|${tgt}`);
+    if (!r.ok) throw new Error('Translation service error');
+    const j = await r.json();
+    return (j.responseData && j.responseData.translatedText) || '';
+  }
+
+  // ---------- Captions & transcript ----------
+  const history = [];
+  let idleTimer = null, liveTimer = null, liveSeq = 0;
+
+  function showCaption(orig, trans) {
+    $('capOrig').textContent = orig || '';
+    $('capTrans').textContent = trans || '';
+    $('captions').classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => $('captions').classList.add('idle'), 7000);
+  }
+
+  function addEntry(orig) {
+    const t = new Date();
+    const stamp = t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const rec = { time: stamp, orig, trans: '…' };
+    history.push(rec);
+    $('trEmpty').style.display = 'none';
+    const div = document.createElement('div');
+    div.className = 'entry';
+    const o = document.createElement('div'); o.className = 'o';
+    const ti = document.createElement('time'); ti.textContent = stamp;
+    o.append(ti, document.createTextNode(orig));
+    const tr = document.createElement('div'); tr.className = 't'; tr.textContent = '…';
+    div.append(o, tr);
+    const body = $('trBody');
+    const stick = body.scrollTop + body.clientHeight >= body.scrollHeight - 40;
+    body.appendChild(div);
+    if (stick) body.scrollTop = body.scrollHeight;
+    return { rec, tr };
+  }
+
+  async function commit(text) {
+    liveSeq++;                    // cancel pending interim translations
+    clearTimeout(liveTimer);
+    const { rec, tr } = addEntry(text);
+    showCaption(text, '…');
+    try {
+      const out = await translate(text);
+      rec.trans = out; tr.textContent = out;
+      showCaption(text, out);
+    } catch (e) {
+      rec.trans = '(translation failed)'; tr.textContent = rec.trans;
+      setStatus('Translation failed — check your connection.', 'err');
+    }
+  }
+
+  function interim(text) {
+    if (!text) return;
+    $('capOrig').textContent = text;
+    $('captions').classList.remove('idle');
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => $('captions').classList.add('idle'), 7000);
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(async () => {
+      const id = ++liveSeq;
+      try {
+        const out = await translate(text);
+        if (id === liveSeq) $('capTrans').textContent = out;
+      } catch {}
+    }, 350);
+  }
+
+  // ---------- Speech recognition ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recog = null, running = false;
+
+  async function start() {
+    if (!SR) { setStatus('Live speech recognition needs Chrome, Edge or Safari.', 'err'); return; }
+    if (!$('stage').querySelector('iframe') && $('url').value.trim()) loadVideo();
+    localStorageSet('src', $('src').value); localStorageSet('tgt', $('tgt').value);
+
+    setStatus('Preparing translator…');
+    await prepareTranslator(base($('src').value), base($('tgt').value));
+
+    recog = new SR();
+    recog.lang = $('src').value;
+    recog.continuous = true;
+    recog.interimResults = true;
+    recog.onresult = e => {
+      let live = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        const t = r[0].transcript.trim();
+        if (r.isFinal) { if (t) commit(t); } else live += t + ' ';
+      }
+      interim(live.trim());
+    };
+    recog.onerror = e => {
+      if (e.error === 'no-speech' || e.error === 'aborted') return;
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        setStatus('Microphone blocked. Allow mic access for this page, then try again.', 'err'); stop(true);
+      } else if (e.error === 'network') {
+        setStatus('Speech service unreachable. Check your internet connection.', 'err'); stop(true);
+      } else if (e.error === 'language-not-supported') {
+        setStatus('Your browser doesn\'t support that spoken language.', 'err'); stop(true);
+      } else setStatus('Speech error: ' + e.error, 'err');
+    };
+    recog.onend = () => { if (running) setTimeout(() => { try { recog.start(); } catch {} }, 150); };
+
+    try { recog.start(); } catch (e) { setStatus('Could not start listening.', 'err'); return; }
+    running = true;
+    $('toggle').textContent = 'Stop';
+    $('toggle').classList.replace('primary', 'stop');
+    $('dot').classList.add('live');
+    setStatus(`Listening in ${$('src').selectedOptions[0].textContent} → ${$('tgt').selectedOptions[0].textContent} (${engineLabel})`);
+  }
+
+  function stop(keepMessage) {
+    running = false;
+    try { recog && recog.stop(); } catch {}
+    $('toggle').textContent = 'Start translating';
+    $('toggle').classList.remove('stop'); $('toggle').classList.add('primary');
+    $('dot').classList.remove('live');
+    if (!keepMessage) setStatus('Stopped.');
+  }
+
+  $('toggle').addEventListener('click', () => running ? stop() : start());
+  const restartIfRunning = () => { if (running) { stop(true); start(); } };
+  $('src').addEventListener('change', restartIfRunning);
+  $('tgt').addEventListener('change', restartIfRunning);
+
+  // ---------- Misc controls ----------
+  $('size').addEventListener('input', e => $('captions').style.setProperty('--cap', e.target.value + 'px'));
+
+  $('clear').addEventListener('click', () => {
+    history.length = 0;
+    $('trBody').querySelectorAll('.entry').forEach(n => n.remove());
+    $('trEmpty').style.display = '';
+  });
+
+  $('dl').addEventListener('click', () => {
+    if (!history.length) { setStatus('Nothing to save yet.'); return; }
+    const txt = history.map(h => `[${h.time}] ${h.orig}\n${h.trans}\n`).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([txt], { type: 'text/plain' }));
+    a.download = 'translated-transcript.txt';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+
+  if (!SR) setStatus('Open this in Chrome or Edge — your browser has no live speech recognition.', 'err');
+})();
+</script>
+</body>
+</html>
